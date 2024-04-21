@@ -9,8 +9,16 @@
 #include <linux/kallsyms.h>
 
 static unsigned long *get_table_addr(void) {
-	// does the custom kernel need to be compiled with "KALLSYMS=y?"
-	// ANSWER: yes - this needs to be enabled otherwise this is always null
+	/*
+	 * Requires:
+	 *
+	 * - Custom kernel with exposed method `kallsyms_lookup_name()`
+	 *   https://github.com/rlrGIT/linux/tree/v6.1-exposed-symbols
+	 *
+	 * - Kernel compiled with KALLSYMS=y an KALLSYMS_ALL=y in 
+	 *   .config file. This allows the kernel to track and 
+	 *   store symbols like 'sys_call_table'.
+	 */
 	return (unsigned long *) kallsyms_lookup_name("sys_call_table");
 }
 
