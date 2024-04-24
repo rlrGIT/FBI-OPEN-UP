@@ -95,6 +95,17 @@ Collect what error messages you can, and look at the reference configs in the [k
 directory. There might be a setting that is required that wasn't mentioned explicitly, esp if you
 are using a different distro.
 
+### Uninstalling a kernel installed with `make install`
+You may need to remove code from any of the following places:
+```
+/boot/vmlinuz*KERNEL-VERSION*
+/boot/initrd*KERNEL-VERSION*
+/boot/System-map*KERNEL-VERSION*
+/boot/config-*KERNEL-VERSION*
+/lib/modules/*KERNEL-VERSION*/
+/var/lib/initramfs/*KERNEL-VERSION*/
+```
+
 ## Current Abilites
 Currently, the only supported feature is dumping the address of the `kallsyms_lookup_name` function,
 which enables us to look for hijackable kernel symbols. We do not need direct exposure to the symbol
